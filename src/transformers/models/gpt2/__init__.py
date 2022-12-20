@@ -54,6 +54,7 @@ else:
         "GPT2ForSequenceClassification",
         "GPT2ForTokenClassification",
         "GPT2LMHeadModel",
+        "GPT2ModelForQuestionAnswering",
         "GPT2Model",
         "GPT2PreTrainedModel",
         "load_tf_weights_in_gpt2",

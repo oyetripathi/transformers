@@ -970,7 +970,7 @@ class GPT2ModelForQuestionAnswering(GPT2PreTrainedModel):
         self.gpt2 = GPT2Model(config)
         #print(config)
         self.qa_outputs = nn.Linear(config.n_embd, 2)
-        self.apply(self.init_weights)
+        self.init_weights()
 
     def forward(self, input_ids, token_type_ids=None, attention_mask=None, start_positions=None, end_positions=None, return_dict=None):
         return_dict = return_dict if return_dict is not None else self.config.use_return_dict
