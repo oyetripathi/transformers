@@ -31,6 +31,7 @@ from ...modeling_outputs import (
     BaseModelOutputWithPastAndCrossAttentions,
     CausalLMOutputWithCrossAttentions,
     SequenceClassifierOutputWithPast,
+    QuestionAnsweringModelOutput,
     TokenClassifierOutput,
 )
 from ...modeling_utils import PreTrainedModel, SequenceSummary
@@ -932,6 +933,79 @@ class GPT2Model(GPT2PreTrainedModel):
             hidden_states=all_hidden_states,
             attentions=all_self_attentions,
             cross_attentions=all_cross_attentions,
+        )
+
+
+class GPT2ModelForQuestionAnswering(GPT2PreTrainedModel):
+    """A linear layer on top of pre-trained GPT-2 output that computes start_logits and end_logits
+    Params:
+        `config`: a BertConfig class instance with the configuration to build a new model.
+    Inputs:
+        `input_ids`: a torch.LongTensor of shape [batch_size, sequence_length]
+            with the word token indices in the vocabulary(see the tokens preprocessing logic in the scripts
+            `extract_features.py`, `run_classifier.py` and `run_squad.py`)
+        `token_type_ids`: an optional torch.LongTensor of shape [batch_size, sequence_length] with the token
+            types indices selected in [0, 1]. Type 0 corresponds to a `sentence A` and type 1 corresponds to
+            a `sentence B` token (see BERT paper for more details).
+        `attention_mask`: an optional torch.LongTensor of shape [batch_size, sequence_length] with indices
+            selected in [0, 1]. It's a mask to be used if the input sequence length is smaller than the max
+            input sequence length in the current batch. It's the mask that we typically use for attention when
+            a batch has varying length sentences.
+        `start_positions`: position of the first token for the labeled span: torch.LongTensor of shape [batch_size].
+            Positions are clamped to the length of the sequence and position outside of the sequence are not taken
+            into account for computing the loss.
+        `end_positions`: position of the last token for the labeled span: torch.LongTensor of shape [batch_size].
+            Positions are clamped to the length of the sequence and position outside of the sequence are not taken
+            into account for computing the loss.
+    Outputs:
+        if `start_positions` and `end_positions` are not `None`:
+            Outputs the total_loss which is the sum of the CrossEntropy loss for the start and end token positions.
+        if `start_positions` or `end_positions` is `None`:
+            Outputs a tuple of start_logits, end_logits which are the logits respectively for the start and end
+            position tokens of shape [batch_size, sequence_length].
+    """
+
+    def __init__(self, config):
+        super(GPT2ModelForQuestionAnswering, self).__init__(config)
+        self.gpt2 = GPT2Model(config)
+        #print(config)
+        self.qa_outputs = nn.Linear(config.n_embd, 2)
+        self.apply(self.init_weights)
+
+    def forward(self, input_ids, token_type_ids=None, attention_mask=None, start_positions=None, end_positions=None, return_dict=None):
+        return_dict = return_dict if return_dict is not None else self.config.use_return_dict
+        gpt2output = self.gpt2(input_ids, None, token_type_ids)
+        sequence_output = gpt2output[0]
+        logits = self.qa_outputs(sequence_output)
+        start_logits, end_logits = logits.split(1, dim=2)
+        start_logits = start_logits.squeeze(-1)
+        end_logits = end_logits.squeeze(-1)
+
+
+        if start_positions is not None and end_positions is not None:
+            if len(start_positions.size()) > 1:
+                start_positions = start_positions.squeeze(-1)
+            if len(end_positions.size()) > 1:
+                end_positions = end_positions.squeeze(-1)
+            ignored_index = start_logits.size(1)
+            start_positions.clamp_(0, ignored_index)
+            end_positions.clamp_(0, ignored_index)
+
+            loss_function = CrossEntropyLoss(ignore_index=ignored_index)
+            start_loss = loss_function(start_logits, start_positions)
+            end_loss = loss_function(end_logits, end_positions)
+            total_loss = (start_loss + end_loss) / 2
+
+        if not return_dict:
+            output = (start_logits, end_logits) + gpt2output[1:]
+            return ((total_loss,) + output) if total_loss is not None else output
+
+        return QuestionAnsweringModelOutput(
+            loss=total_loss,
+            start_logits=start_logits,
+            end_logits=end_logits,
+            hidden_states=gpt2output.hidden_states,
+            attentions=gpt2output.attentions,
         )
 
 
